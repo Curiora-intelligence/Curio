@@ -1,0 +1,62 @@
+{
+  "timestamp_utc": "2026-09-16T08:50:43.898510+00:00",
+  "platform": "macOS-27.0-arm64-arm-64bit-Mach-O",
+  "python": "3.14.7",
+  "packages": {
+    "mlx": "0.32.2",
+    "mlx-lm": "0.31.3",
+    "mlx-vlm": "0.6.17",
+    "transformers": "5.16.1",
+    "torch": "2.14.0",
+    "fastapi": "0.141.1"
+  },
+  "tests": [
+    {
+      "mode": "text",
+      "model": "mlx-community/gpt-oss-20b-MXFP4-Q8",
+      "http_status": 200,
+      "response": {
+        "success": true,
+        "mode": "text",
+        "answer": "4",
+        "conversation_id": "8d8141c9-e1e0-47c1-9451-ab377d8c2362"
+      },
+      "passed": true,
+      "runtime": "mlx",
+      "resident_mode": "text",
+      "seconds": 40.3
+    },
+    {
+      "mode": "vision",
+      "model": "mlx-community/Qwen3-VL-8B-Instruct-8bit",
+      "http_status": 200,
+      "response": {
+        "success": true,
+        "mode": "vision",
+        "answer": "red",
+        "conversation_id": "055bbcae-c152-40c4-963d-7d2166e77572"
+      },
+      "passed": true,
+      "runtime": "mlx",
+      "resident_mode": "vision",
+      "seconds": 16.64
+    },
+    {
+      "mode": "text",
+      "model": "mlx-community/gpt-oss-20b-MXFP4-Q8",
+      "http_status": 200,
+      "response": {
+        "success": true,
+        "mode": "text",
+        "answer": "4",
+        "conversation_id": "7b875515-d3e4-48ea-a73f-388ed12fb554"
+      },
+      "passed": true,
+      "runtime": "mlx",
+      "resident_mode": "text",
+      "seconds": 65.41
+    }
+  ],
+  "health_status": 200,
+  "released_on_shutdown": true
+}

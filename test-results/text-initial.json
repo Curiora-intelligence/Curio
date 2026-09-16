@@ -1,0 +1,32 @@
+{
+  "timestamp_utc": "2026-09-16T08:49:27.736623+00:00",
+  "platform": "macOS-27.0-arm64-arm-64bit-Mach-O",
+  "python": "3.14.7",
+  "packages": {
+    "mlx": "0.32.2",
+    "mlx-lm": "0.31.3",
+    "mlx-vlm": "0.6.17",
+    "transformers": "5.16.1",
+    "torch": "2.14.0",
+    "fastapi": "0.141.1"
+  },
+  "tests": [
+    {
+      "mode": "text",
+      "model": "mlx-community/gpt-oss-20b-MXFP4-Q8",
+      "http_status": 200,
+      "response": {
+        "success": true,
+        "mode": "text",
+        "answer": "4",
+        "conversation_id": "f7e8c823-4406-489c-916c-81dde954df9a"
+      },
+      "passed": true,
+      "runtime": "mlx",
+      "resident_mode": "text",
+      "seconds": 41.38
+    }
+  ],
+  "health_status": 200,
+  "released_on_shutdown": true
+}

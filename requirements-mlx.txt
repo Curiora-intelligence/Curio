@@ -1,0 +1,5 @@
+-r requirements.txt
+mlx==0.32.2
+mlx-lm==0.31.3
+mlx-vlm==0.6.17
+psutil>=7,<8
