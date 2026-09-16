@@ -73,6 +73,8 @@ See [runtime test report](docs/runtime-test-report.md) for observed results and 
 
 ## Configuration and limits
 
+Settings are loaded automatically from `.env` in this folder by both the local launcher and `main.py`. Explicit shell environment variables take precedence. This Mac's `.env` contains the cached checkpoint paths; it is ignored by Git. Use `.env.example` as the template on another machine. No API key is needed for these local models.
+
 - `CURIO_MLX_TEXT_MODEL` / `CURIO_MLX_VISION_MODEL`: local model directories or model IDs when running `uvicorn main:app` directly.
 - `CURIO_MAX_TEXT_TOKENS`: output cap, default 1024.
 - `CURIO_MAX_VISION_TOKENS`: output cap, default 384.

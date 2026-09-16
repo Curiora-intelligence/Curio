@@ -1,6 +1,6 @@
-"""Standalone Curio inference API, extracted from Curiora Campus."""
+from dotenv import load_dotenv
+load_dotenv()
 from contextlib import asynccontextmanager
-
 from fastapi import FastAPI
 from fastapi.concurrency import run_in_threadpool
 

@@ -50,8 +50,8 @@ class ModelGateway:
     def __init__(self) -> None:
 
         self._lock = Lock()
-        self.TEXT_MODEL_ID = os.getenv("CURIO_MLX_TEXT_MODEL", self.TEXT_MODEL_ID)
-        self.VISION_MODEL_ID = os.getenv("CURIO_MLX_VISION_MODEL", self.VISION_MODEL_ID)
+        self.TEXT_MODEL_ID = os.getenv("CURIO_MLX_TEXT_MODEL") or self.TEXT_MODEL_ID
+        self.VISION_MODEL_ID = os.getenv("CURIO_MLX_VISION_MODEL") or self.VISION_MODEL_ID
 
         self._runtime_info: RuntimeInfo | None = None
         self._runtime: RuntimeAdapter | None = None

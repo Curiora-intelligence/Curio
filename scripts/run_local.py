@@ -3,9 +3,11 @@ import argparse
 import os
 
 from app.core.models import cached_model
+from app.core.config import load_settings
 
 
 def main():
+    load_settings()
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8001)
     args = parser.parse_args()
