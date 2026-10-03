@@ -6,3 +6,4 @@ __pycache__/
 models/
 test-results/*.log
 aiml/
+.pytest_cache/

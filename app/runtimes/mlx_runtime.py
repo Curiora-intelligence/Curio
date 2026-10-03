@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import gc
+import os
 from pathlib import Path
 from mlx_lm.sample_utils import make_sampler
-from mlx_lm import generate as llm_generate
+from mlx_lm import stream_generate as llm_stream_generate
 from mlx_lm import load as load_llm
 
 from mlx_vlm import generate as vlm_generate
@@ -50,27 +51,9 @@ class MLXRuntime(RuntimeAdapter):
         return text.strip()
         
     def _extract_final_response(self, text: str) -> str:
-        """
-        Extract the final user-visible response from Harmony structured output.
-        The model may output internal reasoning in an 'analysis' channel before
-        the 'final' channel. We must only return the final channel.
-        """
-        import re
-        
-        # Look for the final channel content
-        pattern = r"<\|channel\|>final<\|message\|>(.*?)(?:<\|end\|>|<\|start\|>|<\|channel\|>|$)"
-        match = re.search(pattern, text, re.DOTALL)
-        
-        if match:
-            # We found an explicit final channel, return only its content
-            answer = match.group(1).strip()
-            # Clean any stray markers that regex might have grabbed
-            return self._clean_text_output(answer)
-            
-        # Fallback: if GPT-OSS returns malformed structured output with no final channel,
-        # prefer a safe fallback message rather than exposing raw structured output.
-        raise RuntimeError("GPT-OSS did not produce a final channel before generation stopped.")
-    
+        from app.runtimes.harmony import encoding, parse
+        return parse(encoding().encode(text, allowed_special="all"), []).final
+
     def _debug_memory(self, label: str) -> None:
         import os
         import psutil
@@ -156,69 +139,36 @@ class MLXRuntime(RuntimeAdapter):
         )
         self._debug_memory("after load")
 
-    def generate_text(
-    self,
-    *,
-    model_id: str,
-    messages: list[dict[str, str]],
-    max_tokens: int,
-    temperature: float,) -> str:
+    def generate_text(self, *, model_id: str, messages: list[dict[str, str]],
+                      max_tokens: int, temperature: float) -> str:
+        turn = self.generate_turn(model_id=model_id, messages=messages, tools=[],
+                                  max_tokens=max_tokens, temperature=temperature)
+        if not turn.final:
+            raise RuntimeError("Text-only generation returned a tool call.")
+        return turn.final
 
+    def generate_turn(self, *, model_id: str, messages: list[dict], tools: list[dict],
+                      max_tokens: int, temperature: float):
+        from app.runtimes.harmony import encoding, parse, render
         self._ensure_text_model(model_id)
+        prompt = render(messages, tools)
+        tokenizer = self._tokenizer
+        previous_eos = set(tokenizer.eos_token_ids)
+        # End-of-message is not end-of-turn: analysis can precede a call or final.
+        self._tokenizer.eos_token_ids = set(encoding().stop_tokens_for_assistant_actions())
+        try:
+            tokens = [chunk.token for chunk in llm_stream_generate(
+                self._model, tokenizer, prompt=prompt, max_tokens=max_tokens,
+                prefill_step_size=max(32, min(512, int(os.getenv("CURIO_MLX_PREFILL_STEP_SIZE", "128")))),
+                sampler=make_sampler(temp=max(0.0, float(temperature)), top_p=1.0, top_k=0))]
+            # stream_generate includes the stop token in its final response chunk.
+            return parse(tokens, tools)
+        except Exception:
+            self._clear_model()
+            raise
+        finally:
+            tokenizer.eos_token_ids = previous_eos
 
-        # Sanitize messages to avoid leaking harmony control tokens
-        for msg in messages:
-            if msg["role"] == "assistant":
-                for marker in (
-                    "<|channel|>analysis<|message|>",
-                    "<|channel|>final<|message|>",
-                    "<|end|>",
-                    "<|start|>"
-                ):
-                    msg["content"] = msg["content"].replace(marker, "")
-
-        formatted_prompt = self._tokenizer.apply_chat_template(
-            messages,
-            add_generation_prompt=True,
-            tokenize=False,
-        )
-
-        print("====== DEBUG HARMONY PROMPT STATE ======")
-        print(f"Message count: {len(messages)}")
-        print(f"Roles: {[m['role'] for m in messages]}")
-        print(f"Message lengths: {[len(m['content']) for m in messages]}")
-        print(f"Formatted prompt length: {len(formatted_prompt)}")
-        print("========================================")
-
-        sampler = make_sampler(
-        temp=max(0.0, float(temperature)),
-        top_p=1.0,
-        top_k=0,
-        )
-
-        result = llm_generate(
-        self._model,
-        self._tokenizer,
-        prompt=formatted_prompt,
-        max_tokens=max_tokens,
-        sampler=sampler,
-        verbose=False,
-        )
-
-        answer = (
-        result
-        if isinstance(result, str)
-        else str(result)
-        ).strip()
-
-        answer = self._extract_final_response(answer)
-
-        if not answer:
-            raise RuntimeError(
-            "MLX LLM generated an empty response."
-            )
-
-        return answer
     # =========================================================
     # VISION / QWEN-VL
     # =========================================================

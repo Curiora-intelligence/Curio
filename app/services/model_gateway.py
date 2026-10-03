@@ -124,6 +124,13 @@ class ModelGateway:
                 temperature=temperature,
             )
 
+    def generate_turn(self, *, messages: list[dict], tools: list[dict],
+                      max_tokens: int = 1024, temperature: float = 0.2):
+        with self._lock:
+            model_id = self.TEXT_MODEL_ID if self.runtime_info.kind == RuntimeKind.MLX else self.TORCH_TEXT_MODEL_ID
+            return self.runtime.generate_turn(model_id=model_id, messages=messages, tools=tools,
+                                               max_tokens=max_tokens, temperature=temperature)
+
     # =========================================================
     # VISION
     # =========================================================

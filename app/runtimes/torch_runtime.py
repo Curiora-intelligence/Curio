@@ -117,68 +117,27 @@ class TorchRuntime(RuntimeAdapter):
             "Curio LLM loaded through PyTorch."
         )
 
-    def generate_text(
-        self,
-        *,
-        model_id: str,
-        messages: list[dict[str, str]],
-        max_tokens: int,
-        temperature: float,
-    ) -> str:
+    def generate_text(self, *, model_id: str, messages: list[dict[str, str]],
+                      max_tokens: int, temperature: float) -> str:
+        turn = self.generate_turn(model_id=model_id, messages=messages, tools=[],
+                                  max_tokens=max_tokens, temperature=temperature)
+        if not turn.final:
+            raise RuntimeError("Text-only generation returned a tool call.")
+        return turn.final
 
+    def generate_turn(self, *, model_id: str, messages: list[dict], tools: list[dict],
+                      max_tokens: int, temperature: float):
+        from app.runtimes.harmony import encoding, parse, render
         self._ensure_text_model(model_id)
-
         import torch
-
-        formatted_prompt = self._tokenizer.apply_chat_template(
-            messages,
-            add_generation_prompt=True,
-            tokenize=False,
-        )
-
-        inputs = self._tokenizer(
-            formatted_prompt,
-            return_tensors="pt",
-        )
-
-        model_device = next(
-            self._model.parameters()
-        ).device
-
-        inputs = {
-            key: value.to(model_device)
-            if hasattr(value, "to")
-            else value
-            for key, value in inputs.items()
-        }
-
-        generated = self._model.generate(
-            **inputs,
-            max_new_tokens=max_tokens,
-            temperature=temperature,
-            do_sample=temperature > 0,
-        )
-
-        input_length = (
-            inputs["input_ids"].shape[-1]
-        )
-
-        output_ids = generated[
-            0,
-            input_length:
-        ]
-
-        answer = self._tokenizer.decode(
-            output_ids,
-            skip_special_tokens=True,
-        ).strip()
-
-        if not answer:
-            raise RuntimeError(
-                "PyTorch LLM generated an empty response."
-            )
-
-        return answer
+        tokens = render(messages, tools)
+        device = next(self._model.parameters()).device
+        inputs = torch.tensor([tokens], device=device)
+        with torch.inference_mode():
+            generated = self._model.generate(input_ids=inputs, max_new_tokens=max_tokens,
+                temperature=temperature, do_sample=temperature > 0,
+                eos_token_id=list(encoding().stop_tokens_for_assistant_actions()))
+        return parse(generated[0, len(tokens):].tolist(), tools)
 
     # =========================================================
     # VISION / VLM

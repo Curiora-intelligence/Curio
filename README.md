@@ -1,91 +1,121 @@
 # Curio
 
-Standalone local inference backend extracted from **Curiora Campus**. Text requests go to **GPT-OSS 20B**; image-only and image-plus-text requests go to **Qwen3-VL 8B**. This folder contains the actual model gateway, runtime adapters, conversation service, vision helper, and FastAPI endpoint. Campus remains intact.
+Curio is one local multimodal intelligence with persistent user memory and typed tools. GPT-OSS 20B handles text and agent reasoning; Qwen3-VL 8B handles images and sampled camera observations. Both use the existing `ModelGateway` and runtime adapters. Only one heavy model is resident at a time.
 
-## Run on this Mac
+The same identity, PostgreSQL memory and agent loop support service discovery, shopping and mock interviews. Providers in the included service catalogue are **fictional demo data**, not real businesses or bookings.
 
-From this folder, use the existing environment and cached model weights:
+## Setup on this Mac
 
 ```sh
 conda activate aiml
-python -m scripts.run_local
+python -m pip install -r requirements-mlx.txt -r requirements-test.txt
+cp .env.example .env  # only if you do not already have a .env
+createdb curio
+# Set DATABASE_URL in .env to your own PostgreSQL database.
+python -m alembic upgrade head
+# Cache the official Harmony vocabulary once while online (not model weights):
+python -c 'from openai_harmony import *; load_harmony_encoding(HarmonyEncodingName.HARMONY_GPT_OSS)'
+python -m scripts.serve
 ```
 
-Open <http://127.0.0.1:8001/docs> for the interactive API. The launcher binds to localhost, uses one worker, and disables Hugging Face network access. It resolves the cached model snapshots before starting. Model weights load on the first inference request, not at server startup.
+PostgreSQL must be running. Configure credentials through environment variables; no database credentials are embedded in the application. Existing `.env` values and model checkpoints are preserved. The offline launcher resolves existing cached MLX checkpoints and binds to `127.0.0.1:8001`, with one worker. It does not download weights. For another machine, use `uvicorn main:app --host 127.0.0.1 --port 8001 --workers 1 --ws-max-size 740000` after configuring model paths.
 
-If the environment is not activated, use:
+Open [the live demo](http://127.0.0.1:8001/live) or [API documentation](http://127.0.0.1:8001/docs). Camera and microphone permissions are optional. Speech recognition availability depends on the browser and may use its vendor's speech service.
+
+## Configuration
+
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL` | PostgreSQL URL; `postgresql+asyncpg://…` recommended. PostgreSQL is the durable source of truth. |
+| `REDIS_URL` | Optional ephemeral state, caches and locks. Missing/unreachable Redis does not stop durable chat. |
+| `CURIO_BROWSER_BACKEND` | `disabled` (default) or `exa`. |
+| `EXA_API_KEY` | Required for Exa. Without it browser tools return `tool_unavailable`. |
+| `CURIO_MLX_TEXT_MODEL` | Existing local GPT-OSS directory or MLX model ID. |
+| `CURIO_MLX_VISION_MODEL` | Existing local Qwen3-VL directory or MLX model ID. |
+| `CURIO_MLX_PREFILL_STEP_SIZE` | Text prompt processing chunk, default 128; bounded to 32–512 to reduce peak unified memory. |
+| `CURIO_MAX_TEXT_TOKENS` | Per-agent-iteration cap, default 1024. |
+| `CURIO_MAX_VISION_TOKENS` | Regular image answer cap, default 384. |
+| `CURIO_FRAME_INTERVAL` | Live cooldown after VLM inference, minimum/default 5 seconds. |
+| `CURIO_EMBEDDING_MODEL` | Optional existing local SentenceTransformer directory. Unset disables embeddings. |
+
+No OpenAI API key is needed. Runtime selection remains Apple Silicon/MLX → NVIDIA CUDA → PyTorch CPU. CPU/CUDA adapters are retained but require their own suitable checkpoints and hardware; automated tests do not establish their real inference performance.
+
+For optional semantic retrieval, install `requirements-semantic.txt`, provide an already downloaded embedding model directory, and have a database administrator enable `CREATE EXTENSION vector` in the Curio database. Vectors are stored alongside memory and scored using pgvector cosine distance. The small demo uses casts over JSON vectors rather than an ANN index. Without embeddings or the extension, keyword/full-text retrieval continues. Existing memories gain embeddings when learned anew; no background backfill/download occurs.
+
+## APIs
+
+| Endpoint | Input / behavior |
+| --- | --- |
+| `POST /curio/analyze` | Multipart `message`, optional `image`, `conversation_id`, `user_id`, `request_id`, `mode`, and paired `latitude`/`longitude`. |
+| `GET /memory/{user_id}` | Active durable memories. |
+| `POST /memory/remember` | JSON `user_id`, `statement`; explicit preference/goal/constraint/skill gap or `remember …`. |
+| `POST /memory/forget` | JSON `user_id`, `memory_id`; deactivates memory. |
+| `POST /discovery/` | JSON `category`, optional paired coordinates, `budget_max`, `preferences`, `availability` (`today` or `any`). |
+| `WS /live/ws/{user_id}` | Sampled vision, transcripts, audio metrics and agent responses. Protocol below. |
+| `GET /health` | Separate `postgres`, `redis`, `models/runtime`, and `service` fields. Model status is loaded/not loaded, not a readiness claim. |
+
+Chat response fields remain `success`, `mode`, `answer`, `conversation_id`, with added `user_id`. Image requests retain the direct Qwen path; use live observations plus a transcript when agent tools are needed for visual input. Uploads accept JPEG, PNG, WebP and GIF up to 15 MB and are removed after success or failure.
+
+Send a stable `user_id` for cross-conversation memory. Omitting it uses `local-demo` for backwards-compatible local requests. A new conversation omits `conversation_id`; send the returned ID to continue. `request_id` replays a completed response without re-executing tools, including first requests. An interrupted run stays recorded and is not silently re-executed; use a new request ID after reviewing its status.
+
+This is a **local hackathon API**: user IDs are client-supplied, not authentication. Bind to localhost. Before multi-user/public deployment, bind IDs to authenticated principals and add authorization/rate limits. Forgetting removes a memory from active retrieval; it does not erase source chat messages or audit history.
+
+## Demo flows
+
+**A — persistent biryani memory**
 
 ```sh
-/Users/saiganeshsattenapalli/miniforge3/envs/aiml/bin/python -m scripts.run_local
+curl http://127.0.0.1:8001/curio/analyze -F 'user_id=demo-alice' \
+  -F 'message=I prefer spicy chicken biryani and usually stay under ₹300.'
+# Omit conversation_id to start a new conversation with the same person:
+curl http://127.0.0.1:8001/curio/analyze -F 'user_id=demo-alice' -F "message=I'm hungry."
+# Use the new conversation_id and your actual location on the next request:
+curl http://127.0.0.1:8001/curio/analyze -F 'user_id=demo-alice' \
+  -F 'conversation_id=REPLACE_WITH_RETURNED_ID' -F 'message=Find something nearby.' \
+  -F 'latitude=17.4401' -F 'longitude=78.3489'
 ```
 
-On another Apple Silicon Mac, create an environment and install `requirements-mlx.txt`. Acquire the two checkpoints separately, or set `CURIO_MLX_TEXT_MODEL` and `CURIO_MLX_VISION_MODEL` to existing local model directories. The local launcher does not download weights.
+The fictional catalogue has Hyderabad-area sample coordinates. Without coordinates, distance is marked unknown; Curio must not invent your location.
 
-## API
+**B — visual discovery:** Open `/live`, use the same user ID, choose discovery, connect, and start the camera. Wait for a structured observation of a leaking tap; ask “This is leaking. Find someone nearby who can fix it today.” Optionally share location. Curio uses the observation and the shared agent tools. Recommendations remain fictional.
 
-- `GET /health`: server liveness; does not claim either model is loaded or ready.
-- `POST /curio/analyze`: multipart form with `message`, optional `image`, and optional `conversation_id`.
-- `GET /docs`, `GET /openapi.json`: generated API documentation.
+**C — shopping:** Send “I prefer minimal black products and my shopping budget is ₹2500.” Start a new conversation in shopping mode, show an object, wait for an observation, then ask “Would I like this?” Curio compares visible evidence against remembered preferences; unknown prices/specifications remain unknown.
 
-```sh
-curl http://127.0.0.1:8001/curio/analyze \
-  -F 'message=What is 2 + 2?'
+**D — interview:** Send “I struggle with database indexing.” Start a new conversation in interview mode and ask “Mock interview me for a backend internship.” Optional mic metrics and camera samples provide observable communication feedback. The system must not infer psychological state from face or voice.
 
-curl http://127.0.0.1:8001/curio/analyze \
-  -F 'message=Describe the visible image.' \
-  -F 'image=@/absolute/path/to/image.png'
+## Live protocol
+
+Client JSON messages:
+
+```json
+{"type":"configure","mode":"shopping"}
+{"type":"configure","latitude":17.4401,"longitude":78.3489}
+{"type":"frame","jpeg":"BASE64_JPEG","captured_at":1791020000.0}
+{"type":"transcript","text":"Would I like this?"}
+{"type":"metrics","metrics":{"duration_seconds":30,"speaking_seconds":22,"pause_count":3,"rms":[0.04,0.05]}}
+{"type":"reason","text":"Give feedback on my answer."}
+{"type":"ping"}
 ```
 
-Successful responses contain `success`, `mode`, `answer`, and `conversation_id`. Send the returned conversation ID with the next request to reuse text history. Images are temporary and are not retained for follow-up turns. JPEG, PNG, WebP and GIF MIME types are accepted, up to 15 MB. Temporary images are removed after successful or failed inference.
+`captured_at` is Unix seconds and optional; supplied stale timestamps are rejected. Frames must be JPEG, ≤512 KB, ≤1280 pixels per side. The client shows a 30 FPS preview but samples at most once per 5-second cooldown. The server drops frames during inference and returns `busy` for concurrent questions (retry after the response). No raw audio is sent. Final browser transcripts are sent on pressing **Send**, avoiding a GPT turn for every partial utterance.
 
-## Architecture
-
-```text
-Input → validation → modality routing → model gateway
-      → runtime → inference → response / temporary-file cleanup
-
-Text  → GPT-OSS 20B
-Image → Qwen3-VL 8B
-```
-
-`ModelGateway` serializes inference and the adapters keep one model resident at a time. Automatic runtime selection prefers Apple Silicon/MLX, then NVIDIA CUDA, then PyTorch CPU. MLX imports are lazy so importing the API does not require an Apple GPU.
-
-| Runtime | Text model | Vision model |
-| --- | --- | --- |
-| MLX | `mlx-community/gpt-oss-20b-MXFP4-Q8` | `mlx-community/Qwen3-VL-8B-Instruct-8bit` |
-| PyTorch adapters | `openai/gpt-oss-20b` | `Qwen/Qwen3-VL-8B-Instruct` |
-
-The PyTorch adapters are retained from Campus; they have **not** been validated with real inference on this Mac. Their checkpoints and NVIDIA hardware are unavailable here. `requirements-torch.txt` describes their dependencies, not a promise of CPU/CUDA compatibility.
-
-Product direction remains **Perceive → Understand → Route → Act → Verify**. This extraction provides inference APIs; it does not implement an agent action or verification loop.
+Server events: `ready`, `configured`, `observation`, `metrics`, `response`, `frame_skipped`, `busy`, `error`, `pong`. Only transcript/reason messages trigger GPT-OSS. Visual observations expire after 60 seconds; Redis session metadata expires automatically. On a 16 GB Mac, a model switch can be slow; pause camera sampling while having a longer text conversation.
 
 ## Tests
 
 ```sh
-python -m pip install -r requirements-test.txt
-python -m unittest discover -v
-python -m scripts.smoke_test --mode both
+python -m pytest -q
+# Real PostgreSQL integration: use a disposable migrated database with pgvector enabled.
+DATABASE_URL=postgresql+asyncpg://localhost/curio_test python -m alembic upgrade head
+psql curio_test -c 'CREATE EXTENSION IF NOT EXISTS vector'
+CURIO_TEST_DATABASE_URL=postgresql+asyncpg://localhost/curio_test python -m pytest -q
+DATABASE_URL=postgresql+asyncpg://localhost/curio_test python -m alembic check
+# Actual cached MLX inference, model switching, and a persisted tool call:
+python -m scripts.verify_runtime --mode both
+# Actual sampled Qwen observation → persistent shopping answer over WebSocket:
+python -m scripts.verify_live
 ```
 
-Contract tests use stubs for model output. The separate smoke test uses actual cached weights and FastAPI requests: arithmetic via GPT-OSS, a synthetic red-square image via Qwen, then arithmetic after switching back to GPT-OSS. It writes responses, HTTP status, timing, package versions and shutdown-release status to `test-results/inference.json`. A failure exits nonzero. Run it in a normal local shell with GPU access.
+Unit/API tests use stub model output and temporary SQLite databases. PostgreSQL tests separately verify persistence in another process, optional vector retrieval, and a real Redis connection failure. The model smoke test requires local PostgreSQL, cached weights, Harmony vocabulary, and Metal access. Results are written to `test-results/persistent-runtime.json`. No CUDA/CPU model smoke is implied.
 
-See [runtime test report](docs/runtime-test-report.md) for observed results and limitations.
-
-## Configuration and limits
-
-Settings are loaded automatically from `.env` in this folder by both the local launcher and `main.py`. Explicit shell environment variables take precedence. This Mac's `.env` contains the cached checkpoint paths; it is ignored by Git. Use `.env.example` as the template on another machine. No API key is needed for these local models.
-
-- `CURIO_MLX_TEXT_MODEL` / `CURIO_MLX_VISION_MODEL`: local model directories or model IDs when running `uvicorn main:app` directly.
-- `CURIO_MAX_TEXT_TOKENS`: output cap, default 1024.
-- `CURIO_MAX_VISION_TOKENS`: output cap, default 384.
-- The smoke test uses smaller output caps (256/96) and no downloads.
-- These models are large for 16 GB unified memory. Cold requests and model switches include loading time. Use one worker and avoid loading both simultaneously.
-- Conversations live in process memory, with no persistence, authentication, expiry or per-user isolation. Run locally; production hosting needs those controls and bounded history.
-- The API validates MIME and size; decoding is left to the inference processor. File uploads are read into memory before the size check.
-- GPT-OSS responses require an explicit final channel. Truncated/malformed output is treated as an error instead of a successful fallback answer.
-
-## Source
-
-Copied from local `Curiora-Campus`, commit `fe8b1e9a916b2cec5f294179c66754b2c0fe61ac`. No Campus source files, credentials, database setup, frontend assets or weight files were moved or changed. The empty Campus `cpu_runtime.py` placeholder was omitted; CPU routing uses `TorchRuntime`.
-
-The standalone copy adds a FastAPI entry point, local launcher, dependencies and tests. It fixes the vision helper's outdated `prompt=` argument, makes runtime imports lazy, allows model paths/output caps to be configured, and removes raw GPT-OSS fallback logging.
+See [architecture](docs/architecture.md) for flow, contracts and boundaries, and [implementation report](docs/implementation-report.md) for observed verification results.

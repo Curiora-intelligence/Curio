@@ -5,7 +5,7 @@ from pathlib import Path
 from app.services.model_gateway import ModelGateway
 
 
-MAX_TOKENS = 384
+MAX_TOKENS = 60000
 TEMPERATURE = 0.2
 
 

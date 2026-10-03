@@ -1,0 +1,63 @@
+{
+  "tests": [
+    {
+      "mode": "text",
+      "status": 200,
+      "response": {
+        "success": true,
+        "mode": "text",
+        "answer": "4",
+        "conversation_id": "80138c7b-5382-47e3-9c56-d4386110f636",
+        "user_id": "runtime-smoke-4ce86d9a-2d51-462e-a251-24c3430771bb"
+      },
+      "tool_calls": [],
+      "passed": true,
+      "seconds": 39.89
+    },
+    {
+      "mode": "vision",
+      "status": 200,
+      "response": {
+        "success": true,
+        "mode": "vision",
+        "answer": "red",
+        "conversation_id": "00e8ab37-0890-498c-ba79-67a74c058adf",
+        "user_id": "runtime-smoke-4ce86d9a-2d51-462e-a251-24c3430771bb"
+      },
+      "tool_calls": [],
+      "passed": true,
+      "seconds": 13.41
+    },
+    {
+      "mode": "text",
+      "status": 200,
+      "response": {
+        "success": true,
+        "mode": "text",
+        "answer": "4",
+        "conversation_id": "843deb0d-723d-4318-b4e9-1ba439a5eec5",
+        "user_id": "runtime-smoke-4ce86d9a-2d51-462e-a251-24c3430771bb"
+      },
+      "tool_calls": [],
+      "passed": true,
+      "seconds": 30.35
+    },
+    {
+      "mode": "tools",
+      "status": 200,
+      "response": {
+        "success": true,
+        "mode": "text",
+        "answer": "**Demo Saffron Kitchen (fictional)**  \nThis fictional provider is located right at your coordinates, offering spicy chicken biryani for \u20b9280\u2014well within your \u20b9300 budget. It has a high rating of 4.6/5 and is available today, making it an ideal match for your preferences.",
+        "conversation_id": "634911b2-f6dd-4721-9e68-8e3bdc518a0b",
+        "user_id": "runtime-smoke-4ce86d9a-2d51-462e-a251-24c3430771bb"
+      },
+      "tool_calls": [
+        "services.search"
+      ],
+      "passed": true,
+      "seconds": 87.0
+    }
+  ],
+  "released_on_shutdown": true
+}

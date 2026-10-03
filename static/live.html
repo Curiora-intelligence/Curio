@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Curio · Live intelligence</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#101918;color:#e6f1e9}body{max-width:1150px;margin:auto;padding:32px}h1{font-size:36px;margin:0 0 8px}p{color:#aec4b5}header{margin-bottom:28px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}section{background:#182623;padding:22px;border:1px solid #31483c;border-radius:16px}video{width:100%;aspect-ratio:4/3;background:#0a1110;border-radius:10px;object-fit:contain}label{display:block;margin:12px 0 6px}input,select,textarea,button{font:inherit;border-radius:8px;border:1px solid #526b5b;padding:11px;background:#102019;color:inherit;box-sizing:border-box}input,select,textarea{width:100%}button{cursor:pointer;margin-top:12px;background:#b5eb83;color:#142414;font-weight:600}button.secondary{background:#263e31;color:#d0eacb}button:disabled{opacity:.45;cursor:default}.row{display:flex;gap:10px}.row>*{flex:1}#status{padding:12px;border-left:3px solid #b5eb83;font-size:14px}#log{height:370px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5}.entry{padding:12px 0;border-bottom:1px solid #31483c}.muted{font-size:13px;color:#aec4b5}#observation{font-size:13px;white-space:pre-wrap;min-height:80px}textarea{min-height:90px}@media(max-width:750px){.grid{grid-template-columns:1fr}body{padding:18px}}
+</style></head><body>
+<header><h1>Curio</h1><p>One intelligence. Your preferences, your surroundings, your next step.</p></header>
+<div class="grid"><section>
+<video id="preview" muted autoplay playsinline></video>
+<div class="row"><button id="camera">Start camera</button><button id="stopCamera" class="secondary">Stop camera</button></div>
+<p class="muted">The preview stays in your browser. One compressed frame is sampled at least 5 seconds after the previous observation. No video or audio recording is uploaded.</p>
+<div id="observation">No visual observation yet.</div>
+</section><section>
+<div class="row"><div><label for="user">User ID</label><input id="user"></div><div><label for="mode">Mode</label><select id="mode"><option value="general">General</option><option value="discovery">Service discovery</option><option value="shopping">Shopping</option><option value="interview">Interview coaching</option></select></div></div>
+<div class="row"><button id="connect">Connect</button><button id="new" class="secondary">New conversation</button><button id="locate" class="secondary">Use location</button></div>
+<p id="status">Disconnected. Use the same user ID to recall memories in a new conversation.</p>
+<div id="log" aria-live="polite"></div>
+<label for="question">Message</label><textarea id="question" placeholder="I prefer spicy chicken biryani and usually stay under ₹300."></textarea>
+<div class="row"><button id="send">Send</button><button id="mic" class="secondary">Start microphone</button></div>
+<p class="muted">Speech recognition is provided by your browser and may use its vendor's speech service. Curio receives the transcript and aggregate audio metrics. Interview feedback covers observable communication only. Service catalogue results are fictional.</p>
+</section></div>
+<script>
+const $=id=>document.getElementById(id);
+$('user').value=localStorage.getItem('curio-user')||crypto.randomUUID();
+let ws,stream,frameTimer,busy=false,locationData={},recognition,audioStream,audioContext,audioTimer,audioSource,audioSnapshot;
+const entry=(who,text)=>{const d=document.createElement('div');d.className='entry';d.textContent=who+': '+text;$('log').append(d);$('log').scrollTop=$('log').scrollHeight;};
+const status=text=>$('status').textContent=text;
+function send(event){if(ws?.readyState!==1){status('Connect first.');return false;}ws.send(JSON.stringify(event));return true;}
+function configure(){send({type:'configure',mode:$('mode').value,...locationData});}
+function connect(){if(ws)ws.close();localStorage.setItem('curio-user',$('user').value);ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/live/ws/${encodeURIComponent($('user').value)}`);
+ws.onopen=()=>{configure();status('Connected. Ready.');};
+ws.onclose=()=>{busy=false;status('Disconnected. Reconnect to continue.');};
+ws.onmessage=e=>{const data=JSON.parse(e.data);if(['response','observation','error','frame_skipped','configured'].includes(data.type)){busy=false;$('send').disabled=false;$('mode').disabled=false;scheduleFrame();}
+if(data.type==='response'){entry('Curio',data.answer);status('Ready.');}
+if(data.type==='observation'){$('observation').textContent=JSON.stringify(data.observation,null,2);status('Observation ready.');}
+if(data.type==='error'){status(data.message);}
+if(data.type==='busy'){status('Inference in progress; retry your message when ready.');}
+};}
+$('connect').onclick=connect;
+$('new').onclick=()=>{connect();entry('Session','New conversation; durable memories are retained for this user.');};
+$('mode').onchange=()=>{if(!busy)configure();};
+$('locate').onclick=()=>navigator.geolocation.getCurrentPosition(p=>{locationData={latitude:p.coords.latitude,longitude:p.coords.longitude};configure();status('Location shared for this session.');},()=>status('Location unavailable. You can still browse the fictional catalogue.'));
+$('send').onclick=()=>{const text=$('question').value.trim();if(!text||busy)return;if(send({type:'transcript',text,...(audioSnapshot?{metrics:audioSnapshot()}: {})})){busy=true;$('send').disabled=true;$('mode').disabled=true;entry('You',text);$('question').value='';status('Curio is thinking…');}};
+$('camera').onclick=async()=>{try{stream=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:640},height:{ideal:480},frameRate:{ideal:30}},audio:false});$('preview').srcObject=stream;scheduleFrame();}catch(e){status('Camera unavailable: '+e.message);}};
+function scheduleFrame(){clearTimeout(frameTimer);if(stream)frameTimer=setTimeout(sampleFrame,5000);}
+function sampleFrame(){if(!stream||!ws||ws.readyState!==1||busy){scheduleFrame();return;}const v=$('preview');if(!v.videoWidth){scheduleFrame();return;}const c=document.createElement('canvas');c.width=Math.min(640,v.videoWidth);c.height=Math.round(c.width*v.videoHeight/v.videoWidth);c.getContext('2d').drawImage(v,0,0,c.width,c.height);busy=true;$('mode').disabled=true;status('Observing sampled frame…');send({type:'frame',jpeg:c.toDataURL('image/jpeg',.65).split(',')[1],captured_at:Date.now()/1000});}
+$('stopCamera').onclick=()=>{clearTimeout(frameTimer);stream?.getTracks().forEach(t=>t.stop());stream=null;$('preview').srcObject=null;};
+async function stopMic(){recognition?.stop();recognition=null;clearInterval(audioTimer);audioStream?.getTracks().forEach(t=>t.stop());audioStream=null;if(audioContext)await audioContext.close();audioContext=null;audioSnapshot=null;$('mic').textContent='Start microphone';}
+$('mic').onclick=async()=>{if(recognition){await stopMic();return;}const Speech=window.SpeechRecognition||window.webkitSpeechRecognition;if(!Speech){status('Speech recognition is unavailable in this browser. Type your transcript.');return;}try{
+audioStream=await navigator.mediaDevices.getUserMedia({audio:true});audioContext=new AudioContext();audioSource=audioContext.createMediaStreamSource(audioStream);const analyser=audioContext.createAnalyser();analyser.fftSize=2048;audioSource.connect(analyser);const samples=new Float32Array(analyser.fftSize);let values=[],speaking=0,total=0,pauses=0,previous=false;audioSnapshot=()=>{const metrics={duration_seconds:Math.max(.1,total),speaking_seconds:speaking,pause_count:pauses,rms:values};values=[];speaking=0;total=0;pauses=0;return metrics;};audioTimer=setInterval(()=>{analyser.getFloatTimeDomainData(samples);const rms=Math.sqrt(samples.reduce((a,x)=>a+x*x,0)/samples.length);const active=rms>.02;values.push(Math.min(1,rms));if(values.length>600)values.shift();total+=.1;if(active)speaking+=.1;if(previous&&!active)pauses++;previous=active;},100);
+recognition=new Speech();recognition.continuous=true;recognition.interimResults=false;recognition.onresult=e=>{const text=e.results[e.results.length-1][0].transcript;$('question').value=($('question').value+' '+text).trim();status('Transcript ready. Press Send when finished.');};recognition.onerror=()=>status('Speech recognition stopped; you can type instead.');recognition.start();$('mic').textContent='Stop microphone';}catch(e){await stopMic();status('Microphone unavailable: '+e.message);}};
+window.addEventListener('beforeunload',()=>{stream?.getTracks().forEach(t=>t.stop());audioStream?.getTracks().forEach(t=>t.stop());ws?.close();});
+</script></body></html>

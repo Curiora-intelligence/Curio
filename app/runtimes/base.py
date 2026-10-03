@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+from app.runtimes.turn import ModelTurn
+
 
 class RuntimeAdapter(ABC):
     """
@@ -31,6 +33,12 @@ class RuntimeAdapter(ABC):
         temperature: float,
     ) -> str:
         raise NotImplementedError
+
+    def generate_turn(self, *, model_id: str, messages: list[dict], tools: list[dict],
+                      max_tokens: int, temperature: float) -> ModelTurn:
+        # Compatibility for simple adapters; GPT-OSS adapters override this method.
+        return ModelTurn(final=self.generate_text(model_id=model_id, messages=messages,
+                                                  max_tokens=max_tokens, temperature=temperature))
 
     @abstractmethod
     def generate_vision(
