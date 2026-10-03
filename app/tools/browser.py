@@ -6,7 +6,7 @@ import logging
 import ipaddress
 import time
 from urllib.parse import urlparse
-
+from ddgs import DDGS
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -45,6 +45,144 @@ def public_url(url: str) -> str:
             raise
     return url
 
+class DDGSBrowser(BrowserBackend):
+    def __init__(self, cache):
+        self.cache = cache
+        self.pages: OrderedDict[str, tuple[float, dict]] = OrderedDict()
+
+    async def search(self, query: str, topn: int = 5) -> dict:
+        def do_search():
+            return list(
+                DDGS().text(
+                    query,
+                    max_results=topn,
+                )
+            )
+
+        from fastapi.concurrency import run_in_threadpool
+
+        raw_results = await run_in_threadpool(do_search)
+
+        results = []
+
+        for item in raw_results[:topn]:
+            url = item.get("href") or item.get("url")
+
+            if not url:
+                continue
+
+            try:
+                url = public_url(url)
+            except ValueError:
+                continue
+
+            page_id = hashlib.sha256(
+                url.encode()
+            ).hexdigest()[:24]
+
+            page = {
+                "page_id": page_id,
+                "url": url,
+                "title": str(
+                    item.get("title", "")
+                )[:500],
+                "text": str(
+                    item.get("body", "")
+                )[:16000],
+                "untrusted": True,
+            }
+
+            self.pages[page_id] = (
+                time.monotonic() + 300,
+                page,
+            )
+
+            await self.cache.set(
+                "page:" + page_id,
+                page,
+                300,
+            )
+
+            results.append(
+                {
+                    "page_id": page_id,
+                    "url": url,
+                    "title": page["title"],
+                    "snippet": page["text"],
+                    "untrusted": True,
+                }
+            )
+
+        return {
+            "results": results
+        }
+
+    async def _page(self, page_id: str):
+        page = await self.cache.get(
+            "page:" + page_id
+        )
+
+        if page is not None:
+            return page
+
+        entry = self.pages.get(page_id)
+
+        if (
+            entry
+            and entry[0] > time.monotonic()
+        ):
+            return entry[1]
+
+        return None
+
+    async def open(self, result_or_url: str) -> dict:
+        page = await self._page(
+            result_or_url
+        )
+
+        if page:
+            return page
+
+        return {
+            "error": "page_unavailable",
+            "message": (
+                "Open currently supports "
+                "results returned by web.search."
+            ),
+        }
+
+    async def find(
+        self,
+        page_id: str,
+        pattern: str,
+    ) -> dict:
+        page = await self._page(
+            page_id
+        )
+
+        if not page:
+            return {
+                "error": "page_expired"
+            }
+
+        lines = page["text"].splitlines()
+
+        matches = [
+            {
+                "line": i + 1,
+                "text": line[:1000],
+            }
+            for i, line in enumerate(lines)
+            if pattern.casefold()
+            in line.casefold()
+        ]
+
+        return {
+            "page_id": page_id,
+            "url": page["url"],
+            "matches": matches[:20],
+            "untrusted": True,
+        }
 
 class ExaBrowser(BrowserBackend):
     def __init__(self, api_key: str, cache, transport=None):
@@ -120,9 +258,23 @@ class FindRequest(BaseModel):
 
 
 def register_browser_tools(registry, settings):
-    backend = ExaBrowser(settings.exa_api_key, registry.cache) if settings.browser_backend == "exa" and settings.exa_api_key else UnavailableBrowser()
+    if (settings.browser_backend == "exa" and settings.exa_api_key):
+        backend = ExaBrowser(
+        settings.exa_api_key,
+        registry.cache,
+        )
+
+    elif settings.browser_backend == "ddgs":
+        backend = DDGSBrowser(
+        registry.cache
+        )
+
+    else:
+        backend = UnavailableBrowser()
     if isinstance(backend, UnavailableBrowser):
-        logging.getLogger(__name__).warning("Real web discovery is unavailable. Set CURIO_BROWSER_BACKEND=exa and EXA_API_KEY in the backend .env; services.search is fictional demo data only.")
+        logging.getLogger(__name__).warning("Real web discovery unavailable. "
+                            "Set CURIO_BROWSER_BACKEND=ddgs, "
+                            "or configure Exa.")
     async def search(args, context): return await backend.search(args.query, args.topn)
     async def open_page(args, context): return await backend.open(args.result_or_url)
     async def find(args, context): return await backend.find(args.page_id, args.pattern)
@@ -133,6 +285,31 @@ def register_browser_tools(registry, settings):
 
 
 def discovery_instructions(available: bool) -> str:
-    availability = ("Real web browsing is configured. For real-world/current restaurants, food, nearby services, Zomato, or explicit web searches, prefer web.search, then web.open for promising results. services.search is only the fictional offline/demo fallback."
-                    if available else "Real web browsing is NOT configured. Explain this when real/current web results are requested. services.search can provide only clearly labeled fictional demo alternatives; never present them as real businesses.")
-    return availability + " Use relevant retrieved preferences and budgets in searches. Retrieve memory.search if further relevant context is needed. For a requested Zomato source, use a query such as site:zomato.com plus the food and the user's supplied locality. Never invent a locality or coordinates; ask for the area if near-me location is missing. Return clickable source URLs actually returned by web.search/web.open. Open pages before claiming prices, ratings, delivery times or availability; otherwise mark these unknown. A search result is not proof of live availability. Separate real sources from fictional demo results. Never invent source URLs or place orders."
+    if available:
+        availability = (
+            "Real web browsing is configured. "
+            "For current or real-world information such as restaurants, "
+            "food, nearby services, Zomato, news, products, reviews, "
+            "documentation, or explicit web searches, prefer web.search. "
+            "Use web.open when a search result needs closer inspection. "
+            "services.search is only the fictional offline/demo fallback."
+        )
+    else:
+        availability = (
+            "Real web browsing is NOT configured. "
+            "Explain this honestly when current or real-world web results "
+            "are requested. services.search may only provide clearly "
+            "labelled fictional demo data."
+        )
+
+    return (
+        availability
+        + " Use relevant retrieved preferences and budgets in searches. "
+        + "Use memory.search when additional persistent user context is needed. "
+        + "For requested Zomato results, search using site:zomato.com plus "
+        + "the user's food request and supplied locality. "
+        + "Never invent location, price, rating, delivery time, availability, "
+        + "businesses, or source URLs. "
+        + "Only state facts supported by tool results. "
+        + "Return actual clickable source URLs returned by web.search/web.open."
+    )
