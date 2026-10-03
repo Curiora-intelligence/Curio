@@ -47,3 +47,12 @@ async def test_exa_search_open_find_with_redis_disabled():
 def test_browser_blocks_private_urls(url):
     with pytest.raises(ValueError):
         public_url(url)
+
+
+def test_real_web_selection_and_fictional_fallback_are_explicit():
+    from app.tools.browser import discovery_instructions
+    enabled = discovery_instructions(True)
+    assert 'prefer web.search' in enabled and 'web.open' in enabled and 'site:zomato.com' in enabled
+    assert 'Never invent a locality' in enabled and 'mark these unknown' in enabled
+    disabled = discovery_instructions(False)
+    assert 'NOT configured' in disabled and 'fictional' in disabled

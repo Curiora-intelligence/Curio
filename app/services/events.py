@@ -47,6 +47,18 @@ class RunEvents:
     async def stage(self, name):
         await self._send("stage", {"stage": name, "message": STAGES[name]})
 
+    async def memory(self, memories):
+        labels = []
+        titles = {"food": "Food preference", "style": "Style preference", "career": "Career goal", "interview": "Interview focus"}
+        for memory in memories:
+            key = memory.get("key", "")
+            if key in titles:
+                labels.append(titles[key])
+            elif "budget" in key:
+                value = str(memory.get("value", ""))
+                labels.append("₹" + value + " budget" if value.replace(".", "", 1).isdigit() and len(value) <= 12 else "Budget preference")
+        await self._send("stage", {"stage": "memory", "message": STAGES["memory"], "remembered": list(dict.fromkeys(labels))[:6]})
+
     async def tool(self, name, status):
         # Called only by the registry, after validation/permission and before execution.
         await self._send("tool_" + status, {"tool": name, "status": status})

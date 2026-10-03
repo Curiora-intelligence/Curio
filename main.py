@@ -47,7 +47,7 @@ async def health():
     postgres, redis = await asyncio.gather(curio_service.database.health(), curio_service.cache.health())
     runtime = curio_service.gateway._runtime
     return {"status": "ok" if postgres == "ok" else "degraded", "service": "Curio", "postgres": postgres,
-            "redis": redis, "models/runtime": {"status": "loaded" if runtime else "not_loaded",
+            "redis": redis, "web": {"configured": curio_service.browser.__class__.__name__ == "ExaBrowser"}, "models/runtime": {"status": "loaded" if runtime else "not_loaded",
             "runtime": runtime.name if runtime else None,
             "mlx_installed": importlib.util.find_spec("mlx") is not None,
             "torch_installed": importlib.util.find_spec("torch") is not None,
