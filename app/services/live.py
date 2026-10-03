@@ -102,10 +102,11 @@ class LiveSession:
             if not text:
                 raise ValueError("A transcript or question is required.")
             self.transcript = text
-            if event.metrics:
-                self.audio_metrics = event.metrics
-            if hasattr(self, "audio_metrics"):
-                self.metrics = communication_metrics(text, self.audio_metrics)
+            # A sample belongs to one answer. Do not apply its timing to the
+            # next question prompt or a later typed answer.
+            audio_metrics = event.metrics or getattr(self, "audio_metrics", None)
+            self.audio_metrics = None
+            self.metrics = communication_metrics(text, audio_metrics) if audio_metrics else {}
             self.busy = True
             try:
                 observation = self.observation if self.clock() - self.observed_at <= 60 else {"unavailable": "No recent visual observation."}

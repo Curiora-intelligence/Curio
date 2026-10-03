@@ -1,5 +1,6 @@
 import base64
 import io
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock
 
@@ -72,3 +73,16 @@ async def test_reject_bad_frames_and_stale_frames():
     with pytest.raises(ValueError):
         await session.handle(LiveEvent(type='frame', jpeg='invalid'))
     assert (await session.handle(LiveEvent(type='frame', jpeg=jpeg(), captured_at=1)))['reason'] == 'stale'
+
+
+@pytest.mark.parametrize('separate_sample', [True, False])
+async def test_audio_sample_is_consumed_by_one_answer(separate_sample):
+    service = Mock(cache=EphemeralStore(), respond=AsyncMock(return_value=('answer', 'cid')))
+    session = LiveSession(service, 'alice')
+    metrics = AudioMetrics(duration_seconds=2, speaking_seconds=1, pause_count=1, rms=[.1])
+    if separate_sample:
+        await session.handle(LiveEvent(type='metrics', metrics=metrics))
+    await session.handle(LiveEvent(type='transcript', text='one two three four', metrics=None if separate_sample else metrics))
+    assert json.loads(service.respond.call_args.kwargs['context'])['audio_metrics']['words_per_minute'] == 120
+    await session.handle(LiveEvent(type='transcript', text='Ask the next question.'))
+    assert json.loads(service.respond.call_args.kwargs['context'])['audio_metrics'] == {}
