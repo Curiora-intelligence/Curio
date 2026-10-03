@@ -59,7 +59,7 @@ class ToolRegistry:
         return [{"name": t.name, "alias": t.alias, "description": t.description,
                  "parameters": t.schema.model_json_schema(), "permission": t.permission.value} for t in self.tools.values()]
 
-    async def execute(self, name: str, arguments, context: ToolContext) -> dict:
+    async def execute(self, name: str, arguments, context: ToolContext, events=None) -> dict:
         tool = self.tools.get(name)
         if not tool:
             return {"error": "unknown_tool", "message": "Choose an available tool."}
@@ -80,11 +80,18 @@ class ToolRegistry:
             cached = await self.cache.get(key)
             if cached is not None:
                 return cached
+        if events:
+            await events.stage("tool_execution")
+            await events.tool(name, "started")
         try:
             result = await asyncio.wait_for(tool.handler(args, context), timeout=30)
             if tool.cache_ttl and tool.permission == Permission.READ_ONLY and not result.get("error"):
                 await self.cache.set(key, result, tool.cache_ttl)
+            if events:
+                await events.tool(name, "failed" if result.get("error") else "finished")
             return result
         except Exception:
+            if events:
+                await events.tool(name, "failed")
             # Keep secrets/implementation exceptions out of model-visible errors.
             return {"error": "tool_failed", "message": f"{name} failed. Try another approach or explain the limitation."}

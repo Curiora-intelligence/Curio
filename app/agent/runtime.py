@@ -12,10 +12,12 @@ class AgentRuntime:
         self.gateway, self.registry, self.database, self.cache = gateway, registry, database, cache
 
     async def run(self, messages: list[dict], context: ToolContext, run_id: str,
-                  max_tokens: int = 1024, temperature: float = .2) -> tuple[str, int, str]:
+                  max_tokens: int = 1024, temperature: float = .2, events=None) -> tuple[str, int, str]:
         messages = list(messages)
         for iteration in range(1, self.maximum_iterations + 1):
             await self.cache.set("run:" + run_id, {"iteration": iteration, "status": "reasoning"}, 600)
+            if events:
+                await events.stage("reasoning")
             turn = await run_in_threadpool(self.gateway.generate_turn, messages=messages,
                                           tools=self.registry.definitions(), max_tokens=max_tokens, temperature=temperature)
             if turn.tool_calls:
@@ -25,7 +27,7 @@ class AgentRuntime:
                     arguments = call.arguments if isinstance(call.arguments, dict) else {"raw": str(call.arguments)[:8000]}
                     async with self.database.sessions.begin() as session:
                         call_id = await AgentRepository(session).begin_tool(run_id, call.name, arguments)
-                    result = await self.registry.execute(call.name, call.arguments, context)
+                    result = await self.registry.execute(call.name, call.arguments, context, events=events)
                     async with self.database.sessions.begin() as session:
                         await AgentRepository(session).finish_tool(call_id, result)
                     messages.append({"role": "tool", "name": call.recipient,

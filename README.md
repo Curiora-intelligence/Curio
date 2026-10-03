@@ -119,3 +119,7 @@ python -m scripts.verify_live
 Unit/API tests use stub model output and temporary SQLite databases. PostgreSQL tests separately verify persistence in another process, optional vector retrieval, and a real Redis connection failure. The model smoke test requires local PostgreSQL, cached weights, Harmony vocabulary, and Metal access. Results are written to `test-results/persistent-runtime.json`. No CUDA/CPU model smoke is implied.
 
 See [architecture](docs/architecture.md) for flow, contracts and boundaries, and [implementation report](docs/implementation-report.md) for observed verification results.
+
+## Asynchronous chat
+
+Normal clients can now use `POST /curio/runs` followed by SSE at `/curio/runs/{request_id}/events?user_id=...`. Poll `/curio/runs/{request_id}?user_id=...` to recover the durable answer. `/curio/analyze` is unchanged. See [SSE contract and deployment notes](docs/sse.md).

@@ -52,3 +52,42 @@ MODE_INSTRUCTIONS = {
     "discovery": "Use visible observations and the user's request as context. Distinguish visible evidence from inference.",
     "general": "Ground visual claims in supplied observations and state uncertainty.",
 }
+
+
+# Price comparisons require observed/tool-provided prices, never a remembered ceiling alone.
+BUDGET_CLAIM = re.compile(
+    r"\b(?:within|under|fits?|meets?|below|in)\b.{0,45}\bbudget\b|"
+    r"\bbudget[- ]friendly\b|\baffordable\b|\b(?:cheap|inexpensive)\b", re.I)
+NEGATED_PRICE = re.compile(r"\b(?:can['’]?t|cannot|don['’]?t|not|unknown|whether|if|without|unconfirmed|unclear)\b", re.I)
+VISIBLE_PRICE = re.compile(r"(?:₹|\$|€|£|\bINR\b|\bRs\.?|\bprice\b)\s*[:=]?\s*\d", re.I)
+
+
+def shopping_price_evidence(context: str, tool_results: list[dict]) -> bool:
+    import json
+    try:
+        observation = json.loads(context).get("visual_observation", {})
+        if any(VISIBLE_PRICE.search(str(value)) for value in observation.get("visible_text", [])):
+            return True
+    except (ValueError, AttributeError, TypeError):
+        pass
+
+    def priced(value):
+        if isinstance(value, dict):
+            if isinstance(value.get("price"), (int, float)) and not isinstance(value["price"], bool):
+                return True
+            return any(priced(child) for child in value.values())
+        return isinstance(value, list) and any(priced(child) for child in value)
+    return any(priced(result) for result in tool_results)
+
+
+def safe_shopping_text(text: str, price_known: bool) -> str:
+    if price_known:
+        return text
+    parts = re.split(r"(?<=[.!?])\s+|\n+", text)
+    unsafe = [part for part in parts if BUDGET_CLAIM.search(part) and not NEGATED_PRICE.search(part)]
+    if not unsafe:
+        return text
+    remaining = [part for part in parts if part not in unsafe]
+    if any(NEGATED_PRICE.search(part) and re.search(r"\bprice\b", part, re.I) for part in remaining):
+        return "\n".join(remaining)
+    return "\n".join(remaining + ["Price is unknown, so I can’t confirm whether this item fits your budget."])
